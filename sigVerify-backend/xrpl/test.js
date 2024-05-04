@@ -1,7 +1,6 @@
-import { Client, Wallet, xrpToDrops } from "xrpl";
+import { Client, Wallet } from "xrpl";
 import chalk from 'chalk';
 import pkg from 'elliptic';
-import { subscribe } from "diagnostics_channel";
 const { ec } = pkg;
 
 const client = new Client("wss://s.devnet.rippletest.net:51233/");
@@ -35,10 +34,9 @@ const main = async () => {
     console.log(chalk.green("🌟 Summary of Operations Performed for wallet2:"));
     console.log(chalk.blue(`🔹 Unique User DID Generated: ${did2}`));
 
-    // Example transaction between wallet1 and wallet2
-    const transactionResult = await createAndSubmitTransaction(wallet1, wallet2.address, "1000");
-    console.log(chalk.green("🌟 Transaction Result:"));
-    console.log(chalk.blue(JSON.stringify(transactionResult, null, 2)));
+    // Fetch and display DID documents
+    await displayDIDDocument(did1);
+    await displayDIDDocument(did2);
 
     await client.disconnect();
     console.log("All done!");
@@ -46,7 +44,7 @@ const main = async () => {
 
 async function createAndSignDID(wallet) {
     const publicKeyForAssertion = wallet.publicKey;
-    const did = `did:sigverify:1:${wallet.address}`;
+    const did = `did:xrpl:${wallet.address}`;
     const didDocument = {
         "@context": "https://www.w3.org/ns/did/v1",
         "id": did,
@@ -99,29 +97,43 @@ async function signDID(did, privateKey) {
     }
 }
 
+async function displayDIDDocument(did) {
+    const client = new Client("wss://s.devnet.rippletest.net:51233/");
+    let address = did.substring(9); // Extracts the XRPL address from the DID
+
+	console.log(address);
+    try {
+        await client.connect();
+        const response = await client.request({
+            command: "account_objects",
+            account: address,
+            ledger_index: "validated"
+        });
+
+        if (response.result.account_objects.length === 0) {
+            console.log(chalk.yellow("No DID objects found for the provided DID."));
+            return null;
+        }
+
+        const didDocumentHex = response.result.account_objects[0].DIDDocument;
+
+        console.log(chalk.green(`Successfully retrieved the DID document for: ${did}`));
+        console.log(chalk.blackBright(` --> Value of DID Document: ${didDocumentHex}\n`));
+
+        return didDocumentHex;
+    } catch (error) {
+        console.error(chalk.red(`Error fetching DID objects for address ${address}: ${error.message}`));
+        return null;
+    } finally {
+        await client.disconnect();
+    }
+}
+
 function signData(data, privateKey) {
     const key = ecInstance.keyFromPrivate(privateKey, 'hex');
     const signature = key.sign(data);
     const derSign = signature.toDER('hex');
     return derSign;
-}
-
-async function createAndSubmitTransaction(senderWallet, receiverAddress, amount) {
-    // Create a payment transaction
-    const transaction = {
-        TransactionType: "Payment",
-        Account: senderWallet.address,
-        Destination: receiverAddress,
-        Amount: xrpToDrops("1"),
-    };
-
-	// submit and wait
-	const result = await client.submitAndWait(transaction, {
-		autofill: true,
-		wallet: senderWallet
-	})
-
-    return result;
 }
 
 main();

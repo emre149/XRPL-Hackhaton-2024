@@ -1,7 +1,6 @@
 import { Client, Wallet, xrpToDrops } from "xrpl";
 import chalk from 'chalk';
 import pkg from 'elliptic';
-import { subscribe } from "diagnostics_channel";
 const { ec } = pkg;
 
 const client = new Client("wss://s.devnet.rippletest.net:51233/");
@@ -35,10 +34,18 @@ const main = async () => {
     console.log(chalk.green("🌟 Summary of Operations Performed for wallet2:"));
     console.log(chalk.blue(`🔹 Unique User DID Generated: ${did2}`));
 
-    // Example transaction between wallet1 and wallet2
-    const transactionResult = await createAndSubmitTransaction(wallet1, wallet2.address, "1000");
-    console.log(chalk.green("🌟 Transaction Result:"));
-    console.log(chalk.blue(JSON.stringify(transactionResult, null, 2)));
+    // Example invoice details
+    const invoiceDetails = {
+        issuer: did1,
+        recipient: did2,
+        amount: "1000",
+        // Add other invoice details as needed
+    };
+
+    // Create and sign an invoice DID document for wallet1
+    const signedInvoiceDID = await createInvoiceDIDDocument(wallet1, invoiceDetails);
+    console.log(chalk.green("🌟 Signed Invoice DID Document:"));
+    console.log(chalk.blue(JSON.stringify(signedInvoiceDID, null, 2)));
 
     await client.disconnect();
     console.log("All done!");
@@ -46,7 +53,7 @@ const main = async () => {
 
 async function createAndSignDID(wallet) {
     const publicKeyForAssertion = wallet.publicKey;
-    const did = `did:sigverify:1:${wallet.address}`;
+    const did = `did:xrpl:${wallet.address}`;
     const didDocument = {
         "@context": "https://www.w3.org/ns/did/v1",
         "id": did,
@@ -99,29 +106,34 @@ async function signDID(did, privateKey) {
     }
 }
 
+async function createInvoiceDIDDocument(wallet, invoiceDetails) {
+    const did = `did:xrpl:${wallet.address}`;
+    const didDocument = {
+        "@context": "https://www.w3.org/ns/did/v1",
+        "id": did,
+        "controller": did,
+        "verificationMethod": [{
+            "id": `${did}#keys-1`,
+            "type": "EcdsaSecp256k1RecoveryMethod2020",
+            "controller": did,
+            "publicKeyHex": wallet.publicKey
+        }],
+        "invoiceDetails": invoiceDetails // Add your invoice details here
+    };
+
+    // Sign the DID document
+    const signedInvoiceDID = await signDID(did, wallet.privateKey);
+    console.log(chalk.green("🌟 Signed Invoice DID Document:"));
+    console.log(chalk.blue(JSON.stringify(signedInvoiceDID, null, 2)));
+
+    return signedInvoiceDID;
+}
+
 function signData(data, privateKey) {
     const key = ecInstance.keyFromPrivate(privateKey, 'hex');
     const signature = key.sign(data);
     const derSign = signature.toDER('hex');
     return derSign;
-}
-
-async function createAndSubmitTransaction(senderWallet, receiverAddress, amount) {
-    // Create a payment transaction
-    const transaction = {
-        TransactionType: "Payment",
-        Account: senderWallet.address,
-        Destination: receiverAddress,
-        Amount: xrpToDrops("1"),
-    };
-
-	// submit and wait
-	const result = await client.submitAndWait(transaction, {
-		autofill: true,
-		wallet: senderWallet
-	})
-
-    return result;
 }
 
 main();
