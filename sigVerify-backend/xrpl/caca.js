@@ -1,8 +1,6 @@
 import { Client, Wallet } from "xrpl";
 import chalk from 'chalk';
 
-const client = new Client("wss://s.devnet.rippletest.net:51233/");
-
 // Fetches a DID document from the XRP Ledger
 async function getDIDDocument(did) {
     const client = new Client("wss://s.devnet.rippletest.net:51233/");
@@ -61,6 +59,18 @@ async function createAndSignDID(wallet) {
     return did;
 }
 
+function extractAccountAddressFromDID(did) {
+    // Assuming the DID is in the format "did:xrpl:<account_address>"
+    const prefix = "did:xrpl:";
+    if (did.startsWith(prefix)) {
+        // Remove the prefix to get the account address
+        return did.substring(prefix.length);
+    } else {
+        console.error("Invalid DID format. Expected format: did:xrpl:<account_address>");
+        return null;
+    }
+}
+
 // Main function for fetching DID documents for given DIDs
 async function main() {
 
@@ -77,10 +87,10 @@ async function main() {
     console.log(chalk.green("🌟 Summary of Operations Performed for wallet2:"));
     console.log(chalk.blue(`🔹 Unique User DID Generated: ${did2}`));
 
-    const issuerDID = "did:xrpl:1:rffGVvdyzRxT1KJLs6K4ZaNj5LiDJGxNvu";
+    const issuerDID = extractAccountAddressFromDID(did1);
     await getDIDDocument(issuerDID);
 
-    const userDID = "did:xrpl:1:rp5vPZ49XvsqVtuWvaCSgwSbcya1HVpnaZ";
+    const userDID = extractAccountAddressFromDID(did2);
     await getDIDDocument(userDID);
 }
 
