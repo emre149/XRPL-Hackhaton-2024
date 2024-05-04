@@ -1,81 +1,127 @@
-import xrpl from 'xrpl';
-import axios from 'axios';
+import { Client, Wallet, xrpToDrops } from "xrpl";
 import chalk from 'chalk';
 import pkg from 'elliptic';
-const { ec: EC } = pkg;
-import bs58 from 'bs58';
+import { subscribe } from "diagnostics_channel";
+const { ec } = pkg;
 
-// Pinata API credentials and Axios instance for Pinata Cloud interactions
-const pinataApiKey = 'Q5dtaEmOMD21dDBwfFxGq8WWlIT7UsmIzWB3QlFQsR53wyOA5tJV67qXfMEfGqjL';
-const pinataSecretApiKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI3ZDQ0ODlmNy01NzQ1LTQ5MzctYTVhNi1hNjI3MmQ4OWU0OGMiLCJlbWFpbCI6ImVkZWRlbW9nQHN0dWRlbnQuNDIuZnIiLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwicGluX3BvbGljeSI6eyJyZWdpb25zIjpbeyJpZCI6IkZSQTEiLCJkZXNpcmVkUmVwbGljYXRpb25Db3VudCI6MX0seyJpZCI6Ik5ZQzEiLCJkZXNpcmVkUmVwbGljYXRpb25Db3VudCI6MX1dLCJ2ZXJzaW9uIjoxfSwibWZhX2VuYWJsZWQiOmZhbHNlLCJzdGF0dXMiOiJBQ1RJVkUifSwiYXV0aGVudGljYXRpb25UeXBlIjoic2NvcGVkS2V5Iiwic2NvcGVkS2V5S2V5IjoiY2RjYjM4Mjc0NTcxMzczNzY5NmMiLCJzY29wZWRLZXlTZWNyZXQiOiIzZGJmOGYyMzE1NTFjOTdiYmYxMTNhOWUyYmE5MDFhY2Q3N2E4OWVjNTMxN2ZjYWRhNjVhNmJiZDJlZWI2YjliIiwiaWF0IjoxNzE0ODE0ODAxfQ.wSltN6Rc9zIX0ySHru01nHrZrkSDW2fjcoyDetf-kuE';
-const pinataAxios = axios.create({
-  baseURL: 'https://api.pinata.cloud/',
-  headers: {
-      'pinata_api_key': pinataApiKey,
-      'pinata_secret_api_key': pinataSecretApiKey
-  }
-});
-const prefixPinata = "https://gateway.pinata.cloud/ipfs/";
+const client = new Client("wss://s.devnet.rippletest.net:51233/");
+const ecInstance = new ec('secp256k1');
 
+const main = async () => {
+    console.log("Let's get started...");
+    await client.connect();
 
-// Generates a wallet from a secret
-async function generateWalletFromSecret(secret) {
-    const wallet = xrpl.Wallet.fromSecret(secret);
-    return wallet;
+    console.log("Let's fund 2 accounts...");
+    const { wallet: wallet1, balance: balance1 } = await client.fundWallet();
+    const { wallet: wallet2, balance: balance2 } = await client.fundWallet();
+
+    console.log('wallet1', wallet1);
+    console.log('wallet2', wallet2);
+
+    console.log({
+        balance1,
+        address1: wallet1.address,
+        balance2,
+        address2: wallet2.address,
+    });
+
+    // Create and sign DID for wallet1
+    const did1 = await createAndSignDID(wallet1);
+    console.log(chalk.green("🌟 Summary of Operations Performed for wallet1:"));
+    console.log(chalk.blue(`🔹 Unique User DID Generated: ${did1}`));
+
+    // Create and sign DID for wallet2
+    const did2 = await createAndSignDID(wallet2);
+    console.log(chalk.green("🌟 Summary of Operations Performed for wallet2:"));
+    console.log(chalk.blue(`🔹 Unique User DID Generated: ${did2}`));
+
+    // Example transaction between wallet1 and wallet2
+    const transactionResult = await createAndSubmitTransaction(wallet1, wallet2.address, "1000");
+    console.log(chalk.green("🌟 Transaction Result:"));
+    console.log(chalk.blue(JSON.stringify(transactionResult, null, 2)));
+
+    await client.disconnect();
+    console.log("All done!");
+};
+
+async function createAndSignDID(wallet) {
+    const publicKeyForAssertion = wallet.publicKey;
+    const did = `did:sigverify:1:${wallet.address}`;
+    const didDocument = {
+        "@context": "https://www.w3.org/ns/did/v1",
+        "id": did,
+        "controller": did,
+        "verificationMethod": [{
+            "id": `${did}#keys-1`,
+            "type": "EcdsaSecp256k1RecoveryMethod2020",
+            "controller": did,
+            "publicKeyHex": publicKeyForAssertion
+        }]
+    };
+
+    console.log(chalk.yellow("📄 Detailed View of the DID Document:"));
+    console.log(chalk.yellow(JSON.stringify(didDocument, null, 2)));
+
+    // Sign the DID with the issuer's private key
+    const signedVC = await signDID(did, wallet.privateKey);
+    console.log(chalk.green("🌟 Signed DID Verifiable Credential:"));
+    console.log(chalk.blue(JSON.stringify(signedVC, null, 2)));
+
+    return did;
 }
 
-// Uploads JSON data to IPFS using Pinata
-async function uploadJSONToIPFS(data) {
+async function signDID(did, privateKey) {
+    const vc = {
+        "context": "https://www.w3.org/2018/credentials/v1",
+        "type": ["VerifiableCredential"],
+        "issuer": did,
+        "issuanceDate": new Date().toISOString(),
+        "credentialSubject": {
+            "id": did,
+            "type": "DIDIdentity"
+        }
+    };
+
     try {
-        const response = await pinataAxios.post('pinning/pinJSONToIPFS', data);
-        return response.data.IpfsHash;
+        const vcString = JSON.stringify(vc);
+        const signature = signData(vcString, privateKey);
+        vc['proof'] = {
+            "type": "EcdsaSecp256k1RecoveryMethod2020",
+            "created": new Date().toISOString(),
+            "proofPurpose": "assertionMethod",
+            "verificationMethod": did + '#keys-1',
+            "signature": signature
+        };
+        return vc;
     } catch (error) {
-        console.log(chalk.red('Error uploading JSON to IPFS:'), chalk.white.bgRed(error.message));
+        console.error("Error during DID VC creation and signing:", error);
         return null;
     }
 }
 
-// Creates a user DID and uploads the DID document to IPFS
-async function createDID(issuerWallet, publicKeyForAssertion) {
-    const did = `did:xrpl:1:${issuerWallet.address}`;
-    const didDocument = {
-      "@context": "https://www.w3.org/ns/did/v1",
-      "id": did,
-      "controller": did,
-      "verificationMethod": [{
-        "id": `${did}#keys-1`,
-        "type": "EcdsaSecp256k1RecoveryMethod2020",
-        "controller": did,
-        "publicKeyHex": publicKeyForAssertion
-      }]
+function signData(data, privateKey) {
+    const key = ecInstance.keyFromPrivate(privateKey, 'hex');
+    const signature = key.sign(data);
+    const derSign = signature.toDER('hex');
+    return derSign;
+}
+
+async function createAndSubmitTransaction(senderWallet, receiverAddress, amount) {
+    // Create a payment transaction
+    const transaction = {
+        TransactionType: "Payment",
+        Account: senderWallet.address,
+        Destination: receiverAddress,
+        Amount: xrpToDrops("1"),
     };
 
-    const didIPFSLink = await uploadJSONToIPFS(didDocument);
-    const buffer = bs58.decode(didIPFSLink);
-    const fullHexString = buffer.toString('hex');
-    const hexCID = fullHexString.substring(4);
+	// submit and wait
+	const result = await client.submitAndWait(transaction, {
+		autofill: true,
+		wallet: senderWallet
+	})
 
-    // Outputting operation summary
-    console.log(chalk.green("🌟 Summary of Operations Performed:"));
-    console.log(chalk.blue(`🔹 Unique User DID Generated: ${did}`));
-    console.log(chalk.yellow("📄 Detailed View of the DID Document:"));
-    console.log(chalk.yellow(JSON.stringify(didDocument, null, 2)));
-    console.log(chalk.blue(`🔗 Direct Link to DID Document on IPFS: ${prefixPinata + didIPFSLink}`));
-    console.log(chalk.blue(`🔖 CID of the IPFS Content: ${hexCID}`));
-
-    return prefixPinata + didIPFSLink;
+    return result;
 }
 
-// Main execution function
-async function main() {
-    // User credentials
-    const userPublicKeyForAssertion = '0307248CE83C5301FAE84428730FA46A97F10F75784F633BBCD912C60973D7F2DA';
-    const userSecret = "sEdToXXs9NXwguHsJjbWi4bGVwtKqsP";
-
-    // Creating wallet and DID
-    const issuerWallet = await generateWalletFromSecret(userSecret);
-    await createDID(issuerWallet, userPublicKeyForAssertion);
-}
-
-// Running the main function
 main();
