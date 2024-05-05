@@ -6,6 +6,7 @@ const { ec } = pkg;
 const client = new Client("wss://s.devnet.rippletest.net:51233/");
 const ecInstance = new ec('secp256k1');
 
+// ACCOUNT CREATION (XRPL + DID)
 const main = async () => {
     console.log("Let's get started...");
     await client.connect();
@@ -51,6 +52,7 @@ const main = async () => {
     console.log("All done!");
 };
 
+// VC SIGNATURE
 async function createAndSignDID(wallet) {
     const publicKeyForAssertion = wallet.publicKey;
     const did = `did:xrpl:${wallet.address}`;
@@ -77,6 +79,7 @@ async function createAndSignDID(wallet) {
     return did;
 }
 
+// SIGNATURE
 async function signDID(did, privateKey) {
     const vc = {
         "context": "https://www.w3.org/2018/credentials/v1",
@@ -106,6 +109,7 @@ async function signDID(did, privateKey) {
     }
 }
 
+// DIDDocument Creator
 async function createInvoiceDIDDocument(wallet, invoiceDetails) {
     const did = `did:xrpl:${wallet.address}`;
     const didDocument = {
